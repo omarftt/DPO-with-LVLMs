@@ -1,2 +1,14 @@
-/llava-dpo-1.5
-/results
+# --- Python cache ---
+__pycache__/
+
+# --- Training / Experiment outputs ---
+# Ignore any folders starting with these prefixes
+caldpo_*/
+llava-caldpo-*/
+results_*/
+train_logs_*
+llava-dpo-1.5/
+
+# --- Evaluation and logs ---
+*.log
+*.txt
