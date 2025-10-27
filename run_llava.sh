@@ -12,7 +12,7 @@ set -e
 MODEL_NAME="llava-hf/llava-1.5-7b-hf"
 DATASET_NAME="Eftekhar/HA-DPO-Dataset"
 OUTPUT_DIR="./llava-caldpo-1.5"
-EPOCHS=1
+EPOCHS=3
 BATCH_SIZE=2
 GRAD_ACCUM_STEPS=32
 NUM_PROC=16

@@ -61,14 +61,24 @@ def format_llava(example, processor):
     Format dataset examples for LLaVA model input.
     
     Args:
-        example (dict): Single example containing image, question, chosen, rejected, and image_path.
+        example (dict): Single example containing image, question, chosen, and rejected.
         processor (AutoProcessor): Processor used to format inputs for LLaVA.
 
     Returns:
         dict: Processed example with prompt, chosen, rejected, and resized images.
     """
-    # Handle image input (ensure list)
-    images = [example["image_path"]] if not isinstance(example["image_path"], list) else example["image_path"]
+    # Handle image input - the dataset has 'image' column, not 'image_path'
+    # Images are already loaded as PIL Images
+    img = example["image"]
+    
+    # Ensure it's a PIL Image
+    if not isinstance(img, Image.Image):
+        if hasattr(img, 'convert'):  # It might be in a different format
+            img = img.convert("RGB")
+        else:
+            raise ValueError(f"Unexpected image type: {type(img)}")
+    
+    images = [img]
 
     # Build chat messages
     prompt = [{"role": "user", "content": [{"type": "image"} for _ in images] +
@@ -85,8 +95,6 @@ def format_llava(example, processor):
     max_size = processor.image_processor.size.get("max_size", 1024)
     resized_images = []
     for img in images:
-        if not isinstance(img, Image.Image):
-            img = Image.open(img).convert("RGB") if os.path.exists(img) else Image.fromarray(img)
         img.thumbnail((max_size, max_size))
         resized_images.append(img)
 
@@ -100,7 +108,7 @@ def format_llava(example, processor):
 
 def prepare_dataset(dataset_name, processor, num_proc=32):
     """
-    Load and process the dataset for DPO training.
+    Load and process the dataset for Cal-DPO training.
     
     Args:
         dataset_name (str): Hugging Face dataset identifier or local path.
@@ -152,6 +160,11 @@ def train(args):
     training_args = DPOConfig(
         output_dir=args.output_dir,
         bf16=args.bf16,
+        learning_rate=5e-6,
+        lr_scheduler_type="cosine",
+        warmup_ratio=0.1,
+        beta=0.1,
+        max_grad_norm=1.0,
         gradient_checkpointing=args.gradient_checkpointing,
         logging_dir=os.path.join(args.output_dir, "logs"),
         per_device_train_batch_size=args.batch_size,
@@ -160,11 +173,26 @@ def train(args):
         dataset_num_proc=args.num_proc,
         dataloader_num_workers=args.num_workers,
         logging_steps=args.log_steps,
+        save_steps=100,
         report_to="tensorboard",
     )
 
     # Optional LoRA config
-    peft_config = LoraConfig(target_modules="all-linear") if args.use_lora else None
+    peft_config = LoraConfig(
+    r=16,  
+    lora_alpha=32,  # 2*r
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+    use_rslora=True, 
+    
+    target_modules=[
+        # Language model (definitely include)
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+        
+    ],
+) if args.use_lora else None
     print("==============================================================")
     print("Initializing DPO trainer...")
     trainer = DPOTrainer(
