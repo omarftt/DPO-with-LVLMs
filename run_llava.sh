@@ -11,7 +11,7 @@ set -e
 # ----------- CONFIGURATION -----------
 MODEL_NAME="llava-hf/llava-1.5-7b-hf"
 DATASET_NAME="Eftekhar/HA-DPO-Dataset"
-OUTPUT_DIR="./llava-caldpo-1.5"
+OUTPUT_DIR="./llava-dpo-1.5"
 EPOCHS=3
 BATCH_SIZE=2
 GRAD_ACCUM_STEPS=32
@@ -21,7 +21,7 @@ BF16=true
 USE_LORA=true
 GRADIENT_CHECKPOINTING=true
 LOG_STEPS=10
-PYTHON_SCRIPT="llava_caldpo.py"
+PYTHON_SCRIPT="llava_dpo.py"
 LOG_FILE="train_logs.txt"
 # -------------------------------------
 
@@ -35,8 +35,8 @@ echo ""
 
 # ----------- ENVIRONMENT SETUP -----------
 # Activate your conda environment if needed
-source ~/.bashrc
-conda activate new-hadpo
+# source ~/.bashrc
+# conda activate new-hadpo
 
 # Optional: set visible GPU
 export CUDA_VISIBLE_DEVICES=0
