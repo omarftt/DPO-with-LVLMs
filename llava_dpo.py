@@ -6,6 +6,7 @@ This script:
 - Formats data for LLaVA input (image + question + chosen/rejected responses)
 - Prepares model and LoRA configuration
 - Runs DPO training with TensorBoard logging
+- Automatically resumes from last checkpoint if training is interrupted
 """
 
 import warnings
@@ -20,6 +21,7 @@ from datasets import load_dataset, features
 from transformers import AutoModelForVision2Seq, AutoProcessor
 import trl
 from trl import DPOConfig, DPOTrainer
+from trainers.caldpo import CalDPOTrainer
 import peft
 from peft import LoraConfig
 import tensorboard
@@ -36,7 +38,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description="Train LLaVA using DPO on multimodal preference data")
 
-    parser.add_argument("--dataset_name", type=str, default="Eftekhar/HA-DPO-Dataset",
+    parser.add_argument("--dataset_name", type=str, default="omarftt010/HA-Perturb-DPO-Dataset",
                         help="Name or path of the dataset to load from Hugging Face Hub.")
     parser.add_argument("--model_name", type=str, default="llava-hf/llava-1.5-7b-hf",
                         help="Pretrained LLaVA model to fine-tune.")
@@ -160,11 +162,9 @@ def train(args):
     training_args = DPOConfig(
         output_dir=args.output_dir,
         bf16=args.bf16,
-        learning_rate=5e-6,
+        learning_rate=2e-6,
         lr_scheduler_type="cosine",
-        warmup_ratio=0.1,
         beta=0.1,
-        max_grad_norm=1.0,
         gradient_checkpointing=args.gradient_checkpointing,
         logging_dir=os.path.join(args.output_dir, "logs"),
         per_device_train_batch_size=args.batch_size,
@@ -173,18 +173,18 @@ def train(args):
         dataset_num_proc=args.num_proc,
         dataloader_num_workers=args.num_workers,
         logging_steps=args.log_steps,
-        save_steps=100,
+        save_steps=124,
         report_to="tensorboard",
     )
 
     # Optional LoRA config
     peft_config = LoraConfig(
-    r=16,  
-    lora_alpha=32,  # 2*r
+    r=128,  
+    lora_alpha=256,  # 2*r
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
-    use_rslora=True, 
+    use_rslora=False, 
     
     target_modules=[
         # Language model (definitely include)
@@ -204,8 +204,24 @@ def train(args):
         peft_config=peft_config,
     )
     print("==============================================================")
+    
+    # Check for existing checkpoints and resume if found
+    checkpoint = None
+    if os.path.exists(args.output_dir):
+        checkpoints = [d for d in os.listdir(args.output_dir) if d.startswith("checkpoint-")]
+        if checkpoints:
+            # Sort by checkpoint number and get the latest
+            latest_checkpoint = max(checkpoints, key=lambda x: int(x.split("-")[1]))
+            checkpoint = os.path.join(args.output_dir, latest_checkpoint)
+            print(f"🔄 Resuming from checkpoint: {checkpoint}")
+        else:
+            print("🆕 No checkpoint found, starting fresh training")
+    else:
+        print("🆕 Starting fresh training")
+    
+    print("==============================================================")
     print("Starting training...")
-    trainer.train()
+    trainer.train(resume_from_checkpoint=checkpoint)
     print("==============================================================")
     print("Training completed! Model saved at:", args.output_dir)
     print("==============================================================")
