@@ -173,7 +173,7 @@ def train(args):
         dataset_num_proc=args.num_proc,
         dataloader_num_workers=args.num_workers,
         logging_steps=args.log_steps,
-        save_steps=124,
+        save_steps=157,
         report_to="tensorboard",
     )
 
