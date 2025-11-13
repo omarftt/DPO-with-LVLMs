@@ -10,8 +10,8 @@ set -e
 
 # ----------- CONFIGURATION -----------
 MODEL_NAME="llava-hf/llava-1.5-7b-hf"
-DATASET_NAME="omarftt010/HA-Perturb-DPO-Dataset"
-OUTPUT_DIR="./llava-base-perturb-dpo-lr5"
+DATASET_NAME="Eftekhar/HA-DPO-Dataset"
+OUTPUT_DIR="./llava-base-dpo"
 EPOCHS=1
 BATCH_SIZE=2
 GRAD_ACCUM_STEPS=8
@@ -22,7 +22,7 @@ USE_LORA=true
 GRADIENT_CHECKPOINTING=true
 LOG_STEPS=10
 PYTHON_SCRIPT="llava_dpo.py"
-LOG_FILE="train_logs-bas-perturb-dpo-lr5.txt"
+LOG_FILE="train_logs-llava-base-dpo.txt"
 # -------------------------------------
 
 echo "=============================================================="

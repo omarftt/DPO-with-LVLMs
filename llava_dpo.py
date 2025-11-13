@@ -162,7 +162,7 @@ def train(args):
     training_args = DPOConfig(
         output_dir=args.output_dir,
         bf16=args.bf16,
-        learning_rate=2e-6,
+        learning_rate=5e-6,
         lr_scheduler_type="cosine",
         beta=0.1,
         gradient_checkpointing=args.gradient_checkpointing,

@@ -6,6 +6,7 @@ This script:
 - Formats data for LLaVA input (image + question + chosen/rejected responses)
 - Prepares model and LoRA configuration
 - Runs DPO training with TensorBoard logging
+- Automatically resumes from last checkpoint if training is interrupted
 """
 
 import warnings
@@ -19,12 +20,11 @@ import torch, transformers
 from datasets import load_dataset, features
 from transformers import AutoModelForVision2Seq, AutoProcessor
 import trl
-from trl import DPOConfig
+from trl import DPOConfig #, DPOTrainer
 from trainers.caldpo import CalDPOTrainer
 import peft
 from peft import LoraConfig
 import tensorboard
-from utils import set_seed
 
 print("TRL version:", trl.__version__)
 print("PEFT version:", peft.__version__)
@@ -36,13 +36,13 @@ def parse_args():
     """
     Parse command-line arguments for training configuration.
     """
-    parser = argparse.ArgumentParser(description="Train LLaVA using Cal-DPO on multimodal preference data")
+    parser = argparse.ArgumentParser(description="Train LLaVA using DPO on multimodal preference data")
 
-    parser.add_argument("--dataset_name", type=str, default="Eftekhar/HA-DPO-Dataset",
+    parser.add_argument("--dataset_name", type=str, default="omarftt010/HA-Perturb-DPO-Dataset",
                         help="Name or path of the dataset to load from Hugging Face Hub.")
     parser.add_argument("--model_name", type=str, default="llava-hf/llava-1.5-7b-hf",
                         help="Pretrained LLaVA model to fine-tune.")
-    parser.add_argument("--output_dir", type=str, default="./llava-caldpo-output",
+    parser.add_argument("--output_dir", type=str, default="./llava-dpo-output",
                         help="Directory to save trained model and logs.")
     parser.add_argument("--epochs", type=int, default=2, help="Number of training epochs.")
     parser.add_argument("--batch_size", type=int, default=2, help="Per-device batch size for training.")
@@ -52,11 +52,8 @@ def parse_args():
     parser.add_argument("--bf16", action="store_true", help="Use bfloat16 precision training if supported.")
     parser.add_argument("--log_steps", type=int, default=10, help="Logging interval during training.")
     parser.add_argument("--use_lora", action="store_true", help="Apply LoRA fine-tuning to reduce memory use.")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
     parser.add_argument("--gradient_checkpointing", action="store_true",
                         help="Enable gradient checkpointing to save memory.")
-    parser.add_argument("--beta", type=float, default=0.001,
-                        help="Beta parameter for Cal-DPO")
     
     return parser.parse_args()
 
@@ -141,22 +138,15 @@ def prepare_dataset(dataset_name, processor, num_proc=32):
 
 def train(args):
     """
-    Main Cal-DPO training routine.
+    Main training routine.
     
     Args:
         args (argparse.Namespace): Parsed command-line arguments.
     """
-    set_seed(args.seed)
-    print("=" * 70)
-    print("Cal-DPO Training for LLaVA")
-    print(f"Beta parameter: {args.beta} (Cal-DPO uses smaller beta than standard DPO)")
-    print("=" * 70)
-    
     print("Loading processor and dataset...")
     processor = AutoProcessor.from_pretrained(args.model_name, do_image_splitting=False)
     dataset = prepare_dataset(args.dataset_name, processor, args.num_proc)
-    
-    print("=" * 70)
+    print("==============================================================")
     print("Loading model...")
     model = AutoModelForVision2Seq.from_pretrained(
         args.model_name,
@@ -164,16 +154,17 @@ def train(args):
         device_map="auto"
     )
 
-    # Ensure output directories exist
+     # Ensure output directories exist
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "logs"), exist_ok=True)
-    
-    print("=" * 70)
-    print("Setting up Cal-DPO training configuration...")
+    print("==============================================================")
+    print("Setting up training configuration...")
     training_args = DPOConfig(
         output_dir=args.output_dir,
         bf16=args.bf16,
-        seed=args.seed,
+        learning_rate=5e-6,
+        lr_scheduler_type="cosine",
+        beta=0.1,
         gradient_checkpointing=args.gradient_checkpointing,
         logging_dir=os.path.join(args.output_dir, "logs"),
         per_device_train_batch_size=args.batch_size,
@@ -182,18 +173,28 @@ def train(args):
         dataset_num_proc=args.num_proc,
         dataloader_num_workers=args.num_workers,
         logging_steps=args.log_steps,
+        save_steps=157,
         report_to="tensorboard",
-        beta=args.beta,
     )
 
     # Optional LoRA config
-    peft_config = LoraConfig(target_modules="all-linear") if args.use_lora else None
+    peft_config = LoraConfig(
+    r=128,  
+    lora_alpha=256,  # 2*r
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+    use_rslora=False, 
     
-    print("=" * 70)
-    print("Initializing Cal-DPO trainer...")
-    print(f"Using CalDPOTrainer with beta={args.beta}")
-    print(f"Calibration targets: +{1/(2*args.beta):.1f} (chosen), -{1/(2*args.beta):.1f} (rejected)")
-    
+    target_modules=[
+        # Language model (definitely include)
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+        
+    ],
+) if args.use_lora else None
+    print("==============================================================")
+    print("Initializing DPO trainer...")
     trainer = CalDPOTrainer(
         model,
         ref_model=None,
@@ -202,14 +203,28 @@ def train(args):
         processing_class=processor,
         peft_config=peft_config,
     )
+    print("==============================================================")
     
-    print("=" * 70)
-    print("Starting Cal-DPO training...")
-    trainer.train()
+    # Check for existing checkpoints and resume if found
+    checkpoint = None
+    if os.path.exists(args.output_dir):
+        checkpoints = [d for d in os.listdir(args.output_dir) if d.startswith("checkpoint-")]
+        if checkpoints:
+            # Sort by checkpoint number and get the latest
+            latest_checkpoint = max(checkpoints, key=lambda x: int(x.split("-")[1]))
+            checkpoint = os.path.join(args.output_dir, latest_checkpoint)
+            print(f"🔄 Resuming from checkpoint: {checkpoint}")
+        else:
+            print("🆕 No checkpoint found, starting fresh training")
+    else:
+        print("🆕 Starting fresh training")
     
-    print("=" * 70)
-    print("Cal-DPO training completed! Model saved at:", args.output_dir)
-    print("=" * 70)
+    print("==============================================================")
+    print("Starting training...")
+    trainer.train(resume_from_checkpoint=checkpoint)
+    print("==============================================================")
+    print("Training completed! Model saved at:", args.output_dir)
+    print("==============================================================")
 
 
 if __name__ == "__main__":
