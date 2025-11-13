@@ -21,7 +21,7 @@ from datasets import load_dataset, features
 from transformers import AutoModelForVision2Seq, AutoProcessor
 import trl
 from trl import DPOConfig, DPOTrainer
-from trainers.caldpo import CalDPOTrainer
+# from trainers.caldpo import CalDPOTrainer
 import peft
 from peft import LoraConfig
 import tensorboard
