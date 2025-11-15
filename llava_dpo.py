@@ -162,9 +162,9 @@ def train(args):
     training_args = DPOConfig(
         output_dir=args.output_dir,
         bf16=args.bf16,
-        learning_rate=5e-6,
+        learning_rate=3.5e-6,
         lr_scheduler_type="cosine",
-        beta=0.1,
+        beta=0.1,  # Recently change from 0.1
         gradient_checkpointing=args.gradient_checkpointing,
         logging_dir=os.path.join(args.output_dir, "logs"),
         per_device_train_batch_size=args.batch_size,
@@ -189,8 +189,9 @@ def train(args):
         # Language model (definitely include)
         "q_proj", "k_proj", "v_proj", "o_proj",
         "gate_proj", "up_proj", "down_proj",
-        
-    ],
+        "multi_modal_projector.linear_1",
+        "multi_modal_projector.linear_2"
+    ]
 ) if args.use_lora else None
     print("==============================================================")
     print("Initializing DPO trainer...")
@@ -212,11 +213,11 @@ def train(args):
             # Sort by checkpoint number and get the latest
             latest_checkpoint = max(checkpoints, key=lambda x: int(x.split("-")[1]))
             checkpoint = os.path.join(args.output_dir, latest_checkpoint)
-            print(f"🔄 Resuming from checkpoint: {checkpoint}")
+            print(f" Resuming from checkpoint: {checkpoint}")
         else:
-            print("🆕 No checkpoint found, starting fresh training")
+            print(" No checkpoint found, starting fresh training")
     else:
-        print("🆕 Starting fresh training")
+        print(" Starting fresh training")
     
     print("==============================================================")
     print("Starting training...")
